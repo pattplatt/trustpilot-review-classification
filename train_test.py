@@ -6,8 +6,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import os
-import csv
 
 class ReviewsDataset(Dataset):
     """
@@ -35,7 +33,6 @@ class ReviewsDataset(Dataset):
             # Example offset for 1–5 labels; adjust as appropriate for your data
             "labels": torch.tensor(self.labels[idx] - 1, dtype=torch.long)
         }
-
 
 class ReviewClassifier(nn.Module):
     """
@@ -78,49 +75,40 @@ class ReviewClassifier(nn.Module):
         x = self.fc(x)
         return x
 
+def get_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Train and test a Transformer classifier on reviews.")
+    
+    # Required arguments
+    parser.add_argument("--train_model", action="store_true", help="Train the model.")
+    parser.add_argument("--train_csv", type=str, required=True, help="Path to training set CSV.")
+    parser.add_argument("--val_csv", type=str, required=True, help="Path to validation set CSV.")
+    parser.add_argument("--train_pt", type=str, required=True, help="Path to tokenized training data (.pt).")
+    parser.add_argument("--val_pt", type=str, required=True, help="Path to tokenized validation data (.pt).")
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Train a simple Transformer classifier on tokenized review data."
-    )
+    # Test arguments
+    parser.add_argument("--test", action="store_true", help="Test the model.")
+    parser.add_argument("--test_csv", type=str, required=True, help="Path to test set CSV.")
+    parser.add_argument("--test_pt", type=str, required=True, help="Path to tokenized test data (.pt).")
+    parser.add_argument("--model_path", type=str, default="model.pth", help="Path to save/load the model.")
 
-    # Required arguments for file paths
-    parser.add_argument("--train_csv", type=str, required=True,
-                        help="Path to the CSV file containing training set metadata (e.g., ratings).")
-    parser.add_argument("--val_csv", type=str, required=True,
-                        help="Path to the CSV file containing validation set metadata (e.g., ratings).")
-    parser.add_argument("--train_pt", type=str, required=True,
-                        help="Path to the PyTorch file (.pt) with tokenized training data.")
-    parser.add_argument("--val_pt", type=str, required=True,
-                        help="Path to the PyTorch file (.pt) with tokenized validation data.")
-
-    # Optional arguments for model hyperparameters
-    parser.add_argument("--vocab_size", type=int, default=31102,
-                        help="Size of the vocabulary (number of tokens).")
-    parser.add_argument("--embed_dim", type=int, default=128,
-                        help="Size of the token embeddings.")
-    parser.add_argument("--num_heads", type=int, default=4,
-                        help="Number of attention heads in the Transformer encoder.")
-    parser.add_argument("--num_layers", type=int, default=2,
-                        help="Number of Transformer encoder layers.")
-    parser.add_argument("--hidden_dim", type=int, default=128,
-                        help="Dimension of the feedforward sub-layer in Transformer.")
-    parser.add_argument("--num_classes", type=int, default=5,
-                        help="Number of output classes.")
+    # Model parameters
+    parser.add_argument("--vocab_size", type=int, default=31102, help="Vocabulary size.")
+    parser.add_argument("--embed_dim", type=int, default=128, help="Embedding dimension.")
+    parser.add_argument("--num_heads", type=int, default=4, help="Number of attention heads.")
+    parser.add_argument("--num_layers", type=int, default=2, help="Number of transformer layers.")
+    parser.add_argument("--hidden_dim", type=int, default=128, help="Feedforward hidden size.")
+    parser.add_argument("--num_classes", type=int, default=5, help="Number of output classes.")
 
     # Training settings
-    parser.add_argument("--batch_size", type=int, default=32,
-                        help="Batch size for training and validation.")
-    parser.add_argument("--lr", type=float, default=5e-4,
-                        help="Learning rate for the Adam optimizer.")
-    parser.add_argument("--epochs", type=int, default=5,
-                        help="Number of epochs to train.")
-    parser.add_argument("--device", type=str, default=None,
-                        help="Device to run on: 'cpu', 'cuda', or 'mps'. If None, the script will auto-detect.")
-    parser.add_argument("--output_path", type=str, default="model.pth",
-                        help="Path to save the trained model.")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size.")
+    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate.")
+    parser.add_argument("--epochs", type=int, default=5, help="Number of epochs.")
+    parser.add_argument("--device", type=str, default=None, help="Device to use (cpu, cuda, mps).")
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+def train(args):
 
     # If device not provided, choose auto
     if args.device is None:
@@ -225,8 +213,70 @@ def main():
     df.to_csv("training_log.csv", index=False)
 
     # Save the trained model
-    torch.save(model.state_dict(), f'{args.output_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}.pth' )
-    print(f"Training Complete! Model saved to {args.output_path}")
+    torch.save(model.state_dict(), f'{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}.pth' )
+    print(f"Training Complete! Model saved to {args.model_path}")
+
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+def test(args):
+
+    test_labels = pd.read_csv(args.test_csv, delimiter=",", header=0, encoding="utf8")
+    test_data = torch.load(args.test_pt)
+
+    test_dataset = ReviewsDataset(test_data, test_labels['Rating'].to_numpy())
+    test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+
+    # Load the trained model (ensure you saved it before)
+    model = ReviewClassifier(
+        vocab_size=args.vocab_size,
+        embed_dim=args.embed_dim,
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
+        hidden_dim=args.hidden_dim,
+        num_classes=args.num_classes
+    )
+    
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    model.load_state_dict(torch.load(f'{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}.pth', map_location=device))
+    model.to(device)
+    model.eval()  # Set to evaluation mode
+
+    # Evaluation Loop
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for batch in test_dataloader:
+            input_ids = batch["input_ids"].to(device)
+            attn_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
+
+            outputs = model(input_ids, attn_mask)
+            predictions = torch.argmax(outputs, dim=1)
+
+            all_preds.extend(predictions.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+    # Compute Accuracy
+    test_accuracy = accuracy_score(all_labels, all_preds)
+    print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
+
+    # Generate Classification Report
+    print("\nClassification Report:")
+    print(classification_report(all_labels, all_preds, target_names=[str(i) for i in range(0, 5)]))
+
+    # Confusion Matrix
+    print("\nConfusion Matrix:")
+    print(confusion_matrix(all_labels, all_preds))
+
+def main():
+    args = get_args()
+
+    if args.train_model:
+        train(args)
+
+    if args.test:
+        test(args)
 
 if __name__ == "__main__":
     main()
