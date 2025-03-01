@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+import os
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 class ReviewsDataset(Dataset):
     """
@@ -210,13 +212,20 @@ def train(args):
 
     # Convert to DataFrame and save as CSV
     df = pd.DataFrame(training_logs, columns=["Epoch", "Train Loss", "Val Loss", "Val Accuracy"])
-    df.to_csv("training_log.csv", index=False)
 
-    # Save the trained model
-    torch.save(model.state_dict(), f'{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}.pth' )
-    print(f"Training Complete! Model saved to {args.model_path}")
+    # Create a directory for the model using its name
+    model_dir = f"{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}"
+    os.makedirs(model_dir, exist_ok=True)  # Ensure directory is created
 
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+    # Save the trained model inside the directory
+    model_save_path = os.path.join(model_dir, "model.pth")
+    torch.save(model.state_dict(), model_save_path)
+    print(f"Training Complete! Model saved to {model_save_path}")
+
+    # Save training logs as CSV inside the directory
+    csv_save_path = os.path.join(model_dir, "training_log.csv")
+    df.to_csv(csv_save_path, index=False)
+    print(f"Training log saved to {csv_save_path}")
 
 def test(args):
 
@@ -237,7 +246,7 @@ def test(args):
     )
     
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    model.load_state_dict(torch.load(f'{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}.pth', map_location=device))
+    model.load_state_dict(torch.load(f'./{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}/model.pth', map_location=device))
     model.to(device)
     model.eval()  # Set to evaluation mode
 
