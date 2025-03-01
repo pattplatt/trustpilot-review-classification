@@ -8,6 +8,9 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import os
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
 
 class ReviewsDataset(Dataset):
     """
@@ -271,12 +274,41 @@ def test(args):
     print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
 
     # Generate Classification Report
-    print("\nClassification Report:")
-    print(classification_report(all_labels, all_preds, target_names=[str(i) for i in range(0, 5)]))
+    class_report = classification_report(all_labels, all_preds, target_names=[str(i) for i in range(0, 5)], output_dict=True)
+
+    # Convert classification report to DataFrame
+    class_report_df = pd.DataFrame(class_report).transpose()
+    
+    # Define the model directory
+    model_dir = f"{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}"
+    os.makedirs(model_dir, exist_ok=True)
+
+    # Save accuracy and classification report to CSV
+    accuracy_report_path = os.path.join(model_dir, "test_results.csv")
+    
+    # Save as CSV
+    with open(accuracy_report_path, "w", encoding="utf-8") as f:
+        f.write(f"Test Accuracy,{test_accuracy * 100:.2f}%\n\n")
+        class_report_df.to_csv(f)
+
+    print(f"Test results saved to {accuracy_report_path}")
 
     # Confusion Matrix
+    conf_matrix = confusion_matrix(all_labels, all_preds)
     print("\nConfusion Matrix:")
-    print(confusion_matrix(all_labels, all_preds))
+    print(conf_matrix)
+
+    # Plot Confusion Matrix
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="Blues", xticklabels=np.arange(0, 5), yticklabels=np.arange(0, 5))
+    plt.xlabel("Predicted Labels")
+    plt.ylabel("True Labels")
+    plt.title("Confusion Matrix")
+
+    # Save the figure inside the model directory
+    conf_matrix_path = os.path.join(model_dir, "confusion_matrix.png")
+    plt.savefig(conf_matrix_path)
+    plt.close()
 
 def main():
     args = get_args()
