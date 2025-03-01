@@ -83,7 +83,7 @@ class ReviewClassifier(nn.Module):
 def get_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Train and test a Transformer classifier on reviews.")
-    
+
     # Required arguments
     parser.add_argument("--train_model", action="store_true", help="Train the model.")
     parser.add_argument("--train_csv", type=str, required=True, help="Path to training set CSV.")
@@ -110,6 +110,7 @@ def get_args():
     parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate.")
     parser.add_argument("--epochs", type=int, default=5, help="Number of epochs.")
     parser.add_argument("--device", type=str, default=None, help="Device to use (cpu, cuda, mps).")
+    parser.add_argument("--weighted_loss", action="store_true", help="Compute weighted loss for inbalanced data")
 
     return parser.parse_args()
 
@@ -135,6 +136,23 @@ def train(args):
     train_df = pd.read_csv(args.train_csv, delimiter=",", header=0, encoding="utf8")
     val_df = pd.read_csv(args.val_csv, delimiter=",", header=0, encoding="utf8")
 
+    # Get label counts
+    label_counts = np.bincount(train_df['Rating'] - 1)  # Count occurrences of each label
+
+    # Normalize to get ratio
+    label_ratios = label_counts / sum(label_counts)
+
+    print("Label Ratios:", label_ratios)
+
+    # Compute inverse frequencies
+    class_weights = 1.0 / (label_counts + 1e-6)  # Avoid division by zero
+    class_weights /= class_weights.sum()  # Normalize
+
+    # Convert to tensor for PyTorch
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+
+    print("Class Weights:", class_weights_tensor)
+
     # Load tokenized data (PyTorch saved tensors)
     train_data = torch.load(args.train_pt)
     val_data = torch.load(args.val_pt)
@@ -156,8 +174,21 @@ def train(args):
         num_classes=args.num_classes
     ).to(device)
 
+    # Compute inverse frequencies
+    class_weights = 1.0 / (label_counts + 1e-6)  # Avoid division by zero
+    class_weights /= class_weights.sum()  # Normalize
+
+    # Convert to tensor for PyTorch
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+
+    print("Class Weights:", class_weights_tensor)
+
     # Loss and optimizer
-    criterion = nn.CrossEntropyLoss()
+    if args.weighted_loss:
+        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    else:
+        criterion = nn.CrossEntropyLoss()
+
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # Training loop
@@ -173,6 +204,8 @@ def train(args):
 
             optimizer.zero_grad()
             outputs = model(input_ids, attn_mask)
+            #compute weighted loss if args.weighted_loss is set
+
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
