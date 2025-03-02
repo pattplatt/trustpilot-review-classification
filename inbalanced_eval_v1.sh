@@ -1,0 +1,42 @@
+./train_test.py \
+    --train_model \
+    --test \
+    --train_csv ./data/trustpilot_reviews_inbalanced_5_classes_small/train_inbalanced_5_class_small.csv \
+    --val_csv   ./data/trustpilot_reviews_inbalanced_5_classes_small/val_inbalanced_5_class_small.csv \
+    --train_pt  ./data/trustpilot_reviews_inbalanced_5_classes_small/train_inbalanced_tokenized_5_class_small.pt \
+    --val_pt    ./data/trustpilot_reviews_inbalanced_5_classes_small/val_inbalanced_tokenized_5_class_small.pt \
+    --test_csv  ./data/trustpilot_reviews_inbalanced_5_classes_small/test_inbalanced_5_class_small.csv \
+    --test_pt   ./data/trustpilot_reviews_inbalanced_5_classes_small/test_inbalanced_tokenized_5_class_small.pt \
+    --vocab_size 31102 \
+    --embed_dim 64 \
+    --num_heads 4 \
+    --num_layers 3 \
+    --hidden_dim 64 \
+    --num_classes 5 \
+    --batch_size 32 \
+    --lr 5e-4 \
+    --epochs 3 \
+    --device mps \
+    --model_path ./inbalanced_small_weighted_loss \
+    --weighted_loss
+
+./train_test.py \
+    --train_model \
+    --test \
+    --train_csv ./data/trustpilot_reviews_inbalanced_5_classes_small/train_inbalanced_5_class_small.csv \
+    --val_csv   ./data/trustpilot_reviews_inbalanced_5_classes_small/val_inbalanced_5_class_small.csv \
+    --train_pt  ./data/trustpilot_reviews_inbalanced_5_classes_small/train_inbalanced_tokenized_5_class_small.pt \
+    --val_pt    ./data/trustpilot_reviews_inbalanced_5_classes_small/val_inbalanced_tokenized_5_class_small.pt \
+    --test_csv  ./data/trustpilot_reviews_inbalanced_5_classes_small/test_inbalanced_5_class_small.csv \
+    --test_pt   ./data/trustpilot_reviews_inbalanced_5_classes_small/test_inbalanced_tokenized_5_class_small.pt \
+    --vocab_size 31102 \
+    --embed_dim 64 \
+    --num_heads 4 \
+    --num_layers 3 \
+    --hidden_dim 64 \
+    --num_classes 5 \
+    --batch_size 32 \
+    --lr 5e-4 \
+    --epochs 3 \
+    --device mps \
+    --model_path ./inbalanced_small_default_loss \
