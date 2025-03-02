@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import os
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -304,7 +304,11 @@ def test(args):
 
     # Compute Accuracy
     test_accuracy = accuracy_score(all_labels, all_preds)
+    # Compute F1-score (weighted)
+    test_f1_score = f1_score(all_labels, all_preds, average="weighted")
+
     print(f"Test Accuracy: {test_accuracy * 100:.2f}%")
+    print(f"Test F1-Score: {test_f1_score:.4f}")
 
     # Generate Classification Report
     class_report = classification_report(all_labels, all_preds, target_names=[str(i) for i in range(0, 5)], output_dict=True)
@@ -317,14 +321,15 @@ def test(args):
     os.makedirs(model_dir, exist_ok=True)
 
     # Save accuracy and classification report to CSV
-    accuracy_report_path = os.path.join(model_dir, "test_results.csv")
+    test_report_path = os.path.join(model_dir, "test_results.csv")
     
     # Save as CSV
-    with open(accuracy_report_path, "w", encoding="utf-8") as f:
+    with open(test_report_path, "w", encoding="utf-8") as f:
         f.write(f"Test Accuracy,{test_accuracy * 100:.2f}%\n\n")
+        f.write(f"Test F1-Score,{test_f1_score:.4f}\n\n")
         class_report_df.to_csv(f)
 
-    print(f"Test results saved to {accuracy_report_path}")
+    print(f"Test results saved to {test_report_path}")
 
     # Confusion Matrix
     conf_matrix = confusion_matrix(all_labels, all_preds)
