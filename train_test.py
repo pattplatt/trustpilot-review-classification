@@ -95,7 +95,6 @@ def get_args():
     parser.add_argument("--test", action="store_true", help="Test the model.")
     parser.add_argument("--test_csv", type=str, required=True, help="Path to test set CSV.")
     parser.add_argument("--test_pt", type=str, required=True, help="Path to tokenized test data (.pt).")
-    parser.add_argument("--model_path", type=str, default="model.pth", help="Path to save/load the model.")
 
     # Model parameters
     parser.add_argument("--vocab_size", type=int, default=31102, help="Vocabulary size.")
@@ -250,7 +249,7 @@ def train(args):
     df = pd.DataFrame(training_logs, columns=["Epoch", "Train Loss", "Val Loss", "Val Accuracy"])
 
     # Create a directory for the model using its name
-    model_dir = f"{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}"
+    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}{'_weighted' if args.weighted_loss else ''}"
     os.makedirs(model_dir, exist_ok=True)  # Ensure directory is created
 
     # Save the trained model inside the directory
@@ -280,9 +279,22 @@ def test(args):
         hidden_dim=args.hidden_dim,
         num_classes=args.num_classes
     )
-    
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    model.load_state_dict(torch.load(f'./{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}/model.pth', map_location=device))
+
+    # If device not provided, choose auto
+    if args.device is None:
+        # If MPS (Metal on Apple Silicon) is available, prefer that, otherwise GPU if available, else CPU
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+        elif torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
+    else:
+        device = torch.device(args.device)
+
+    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}{'_weighted' if args.weighted_loss else ''}"
+
+    model.load_state_dict(torch.load(f'./{model_dir}/model.pth', map_location=device))
     model.to(device)
     model.eval()  # Set to evaluation mode
 
@@ -317,7 +329,7 @@ def test(args):
     class_report_df = pd.DataFrame(class_report).transpose()
     
     # Define the model directory
-    model_dir = f"{args.model_path}_batch_size{args.batch_size}_lr{args.lr}_epochs{args.epochs}_num_heads{args.num_heads}_num_layers{args.num_layers}_hidden_dim{args.hidden_dim}_num_classes{args.num_classes}"
+    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}{'_weighted' if args.weighted_loss else ''}"
     os.makedirs(model_dir, exist_ok=True)
 
     # Save accuracy and classification report to CSV
