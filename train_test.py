@@ -153,8 +153,8 @@ def train(args):
     print("Class Weights:", class_weights_tensor)
 
     # Load tokenized data (PyTorch saved tensors)
-    train_data = torch.load(args.train_pt)
-    val_data = torch.load(args.val_pt)
+    train_data = torch.load(args.train_pt,  weights_only=False)
+    val_data = torch.load(args.val_pt,  weights_only=False)
 
     # Create Dataset and DataLoader
     train_dataset = ReviewsDataset(train_data, train_df['Rating'].to_numpy())
@@ -265,7 +265,7 @@ def train(args):
 def test(args):
 
     test_labels = pd.read_csv(args.test_csv, delimiter=",", header=0, encoding="utf8")
-    test_data = torch.load(args.test_pt)
+    test_data = torch.load(args.test_pt, weights_only=False)
 
     test_dataset = ReviewsDataset(test_data, test_labels['Rating'].to_numpy())
     test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
@@ -294,7 +294,7 @@ def test(args):
 
     model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}{'_weighted' if args.weighted_loss else ''}"
 
-    model.load_state_dict(torch.load(f'./{model_dir}/model.pth', map_location=device))
+    model.load_state_dict(torch.load(f'./{model_dir}/model.pth', map_location=device,  weights_only=False))
     model.to(device)
     model.eval()  # Set to evaluation mode
 
