@@ -10,6 +10,8 @@ grid = {
     "lr": [1e-3, 5e-4],  # Reduce to 2 key values
     "batch_size": [32, 64],  # Keep common batch sizes
     "weighted_loss": [True, False],  # Keep binary choice
+    "epochs":[3],
+    "num_classes":[5]
 }
 
 # Track progress
@@ -20,7 +22,7 @@ print(f"Starting Grid Search with {total_configs} configurations...\n")
 
 for params in ParameterGrid(grid):
     current_config += 1
-    model_dir = f"model_embed{params['embed_dim']}_heads{params['num_heads']}_layers{params['num_layers']}_hidden{params['hidden_dim']}_lr{params['lr']}_batch{params['batch_size']}{'_weighted' if params['weighted_loss'] else ''}"
+    model_dir = f"model_embed{params['embed_dim']}_heads{params['num_heads']}_layers{params['num_layers']}_hidden{params['hidden_dim']}_lr{params['lr']}_batch{params['batch_size']}_epochs{params['epochs']}_classes{params['num_classes']}{'_weighted' if params['weighted_loss'] else ''}"
 
     os.makedirs(model_dir, exist_ok=True)
     
