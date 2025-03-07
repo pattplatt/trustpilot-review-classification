@@ -39,6 +39,16 @@ class ReviewsDataset(Dataset):
             "labels": torch.tensor(self.labels[idx] - 1, dtype=torch.long)
         }
 
+class PositionalEmbedding(nn.Module):
+    def __init__(self, max_seq_len, embedding_dim):
+        super().__init__()
+        self.position_embeddings = nn.Embedding(max_seq_len, embedding_dim)
+
+    def forward(self, input_ids):
+        seq_length = input_ids.size(1)  # Get sequence length
+        position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device).unsqueeze(0)
+        return self.position_embeddings(position_ids)
+
 class ReviewClassifier(nn.Module):
     """
     A simple Transformer-based classifier that:
@@ -53,15 +63,19 @@ class ReviewClassifier(nn.Module):
         num_heads=4,
         num_layers=2,
         hidden_dim=128,
-        num_classes=5
+        num_classes=5,
+        max_seq_len=512,
+        droput=0.1
     ):
         super(ReviewClassifier, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.positional_embedding = PositionalEmbedding(max_seq_len, embed_dim)
         self.encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
             nhead=num_heads,
             dim_feedforward=hidden_dim,
-            batch_first=True
+            batch_first=True,
+            dropout=droput
         )
         self.transformer_encoder = nn.TransformerEncoder(
             self.encoder_layer, 
@@ -72,6 +86,9 @@ class ReviewClassifier(nn.Module):
     def forward(self, input_ids, attn_mask):
         # Convert tokens to embeddings
         x = self.embedding(input_ids)
+        # Add positional embeddings
+        pos_embed = self.positional_embedding(input_ids)
+        x = x + pos_embed
         # Forward pass through the Transformer encoder
         x = self.transformer_encoder(x)
         # Global average pooling
@@ -103,6 +120,8 @@ def get_args():
     parser.add_argument("--num_layers", type=int, default=2, help="Number of transformer layers.")
     parser.add_argument("--hidden_dim", type=int, default=128, help="Feedforward hidden size.")
     parser.add_argument("--num_classes", type=int, default=5, help="Number of output classes.")
+    parser.add_argument("--max_seq_len", default=512, help="Max sequence length of positional encoding")
+    parser.add_argument("--dropout", default=0.1, help="Droput value")
 
     # Training settings
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size.")
@@ -170,7 +189,9 @@ def train(args):
         num_heads=args.num_heads,
         num_layers=args.num_layers,
         hidden_dim=args.hidden_dim,
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        max_seq_len=args.max_seq_len,
+        droput=args.dropout
     ).to(device)
 
     # Compute inverse frequencies
@@ -277,7 +298,9 @@ def test(args):
         num_heads=args.num_heads,
         num_layers=args.num_layers,
         hidden_dim=args.hidden_dim,
-        num_classes=args.num_classes
+        num_classes=args.num_classes,
+        max_seq_len=args.max_seq_len,
+        droput=args.dropout
     )
 
     # If device not provided, choose auto
