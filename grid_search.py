@@ -13,7 +13,7 @@ grid = {
     "epochs":[3],
     "num_classes":[5]
 }
-
+start_from = 79 
 # Track progress
 total_configs = len(list(ParameterGrid(grid)))
 current_config = 0
@@ -24,11 +24,15 @@ for params in ParameterGrid(grid):
     current_config += 1
     model_dir = f"model_embed{params['embed_dim']}_heads{params['num_heads']}_layers{params['num_layers']}_hidden{params['hidden_dim']}_lr{params['lr']}_batch{params['batch_size']}_epochs{params['epochs']}_classes{params['num_classes']}{'_weighted' if params['weighted_loss'] else ''}"
 
+    if current_config < start_from:
+            print(f"Skipping configuration [{current_config}/{total_configs}]...")
+            continue  # Skip previous configurations
+
     os.makedirs(model_dir, exist_ok=True)
-    
+
     # Display current parameter set
     print(f"[{current_config}/{total_configs}] Running with: embed_dim={params['embed_dim']}, num_heads={params['num_heads']}, num_layers={params['num_layers']}, hidden_dim={params['hidden_dim']}, lr={params['lr']}, batch_size={params['batch_size']}, weighted_loss={params['weighted_loss']}")
-    
+
     command = [
         "./train_test.py",
         "--train_model",
