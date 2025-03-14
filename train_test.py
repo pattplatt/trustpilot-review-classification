@@ -296,7 +296,7 @@ def train(args):
 
         #Append results to list
         training_logs.append([epoch + 1, avg_train_loss, avg_val_loss, val_accuracy])
-        scheduler.step()
+        scheduler.step(avg_val_loss)
 
     # Convert to DataFrame and save as CSV
     df = pd.DataFrame(training_logs, columns=["Epoch", "Train Loss", "Val Loss", "Val Accuracy"])
