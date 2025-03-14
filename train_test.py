@@ -81,7 +81,10 @@ class ReviewClassifier(nn.Module):
             self.encoder_layer, 
             num_layers=num_layers
         )
-        self.fc = nn.Linear(embed_dim, num_classes)
+        self.fc1 = nn.Linear(embed_dim * 2, hidden_dim)  # Double input size due to CLS + pooled
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.1)
+        self.fc2 = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, input_ids, attn_mask):
         # Convert tokens to embeddings
@@ -91,10 +94,20 @@ class ReviewClassifier(nn.Module):
         x = x + pos_embed
         # Forward pass through the Transformer encoder
         x = self.transformer_encoder(x)
-        # Global average pooling
-        x = x.mean(dim=1)
-        # Classification head
-        x = self.fc(x)
+        # Extract [CLS] token representation (first token in sequence)
+        cls_token_output = x[:, 0, :]
+
+        # Max pooling across all token representations
+        pooled_output, _ = torch.max(x, dim=1)
+
+        # Concatenate CLS token and pooled output
+        x = torch.cat((cls_token_output, pooled_output), dim=1)
+
+        # Fully connected layers (feedforward block)
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.fc2(x)  # Final classification layer
         return x
 
 def get_args():
@@ -209,7 +222,8 @@ def train(args):
     else:
         criterion = nn.CrossEntropyLoss()
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
 
     # Training loop
     for epoch in range(args.epochs):
@@ -265,6 +279,7 @@ def train(args):
 
         #Append results to list
         training_logs.append([epoch + 1, avg_train_loss, avg_val_loss, val_accuracy])
+        scheduler.step()
 
     # Convert to DataFrame and save as CSV
     df = pd.DataFrame(training_logs, columns=["Epoch", "Train Loss", "Val Loss", "Val Accuracy"])
