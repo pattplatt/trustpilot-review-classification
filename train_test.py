@@ -4,6 +4,7 @@ import argparse
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import os
@@ -11,6 +12,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+from transformers import AutoModel
 
 class ReviewsDataset(Dataset):
     """
@@ -48,6 +50,20 @@ class PositionalEmbedding(nn.Module):
         seq_length = input_ids.size(1)  # Get sequence length
         position_ids = torch.arange(seq_length, dtype=torch.long, device=input_ids.device).unsqueeze(0)
         return self.position_embeddings(position_ids)
+    
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, alpha=None):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction="none")
+        pt = torch.exp(-ce_loss)
+        focal_loss = (1 - pt) ** self.gamma * ce_loss
+        if self.alpha is not None:
+            focal_loss *= self.alpha[targets]
+        return focal_loss.mean()
 
 class ReviewClassifier(nn.Module):
     """
@@ -59,16 +75,17 @@ class ReviewClassifier(nn.Module):
     def __init__(
         self,
         vocab_size,
-        embed_dim=128,
+        embed_dim=768,
         num_heads=4,
         num_layers=2,
-        hidden_dim=128,
+        hidden_dim=768,
         num_classes=5,
         max_seq_len=512,
         droput=0.1
     ):
         super(ReviewClassifier, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.embedding = AutoModel.from_pretrained("dbmdz/bert-base-german-cased")
+
         self.positional_embedding = PositionalEmbedding(max_seq_len, embed_dim)
         self.encoder_layer = nn.TransformerEncoderLayer(
             d_model=embed_dim,
@@ -77,18 +94,19 @@ class ReviewClassifier(nn.Module):
             batch_first=True,
             dropout=droput
         )
+
         self.transformer_encoder = nn.TransformerEncoder(
             self.encoder_layer, 
             num_layers=num_layers
         )
-        self.fc1 = nn.Linear(embed_dim * 2, hidden_dim)  # Double input size due to CLS + pooled
+        self.fc1 = nn.Linear(embed_dim * 2, hidden_dim)  # 1536 input to hidden_dim
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.1)
         self.fc2 = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, input_ids, attn_mask):
         # Convert tokens to embeddings
-        x = self.embedding(input_ids)
+        x = self.embedding(input_ids,attention_mask=attn_mask).last_hidden_state
         # Add positional embeddings
         pos_embed = self.positional_embedding(input_ids)
         x = x + pos_embed
@@ -128,7 +146,7 @@ def get_args():
 
     # Model parameters
     parser.add_argument("--vocab_size", type=int, default=31102, help="Vocabulary size.")
-    parser.add_argument("--embed_dim", type=int, default=128, help="Embedding dimension.")
+    parser.add_argument("--embed_dim", type=int, default=768, help="Embedding dimension.")
     parser.add_argument("--num_heads", type=int, default=4, help="Number of attention heads.")
     parser.add_argument("--num_layers", type=int, default=2, help="Number of transformer layers.")
     parser.add_argument("--hidden_dim", type=int, default=128, help="Feedforward hidden size.")
@@ -220,11 +238,10 @@ def train(args):
     if args.weighted_loss:
         criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
     else:
-        criterion = nn.CrossEntropyLoss()
+        criterion = FocalLoss()
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
-
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.5)
     # Training loop
     for epoch in range(args.epochs):
         # Training Phase
@@ -245,8 +262,7 @@ def train(args):
             optimizer.step()
             total_train_loss += loss.item()
 
-        avg_train_loss = total_train_loss / len(train_dataloader)
-
+        avg_train_loss = total_train_loss / len(train_dataloader)        
         # Validation Phase
         model.eval()
         total_val_loss = 0.0
@@ -268,6 +284,7 @@ def train(args):
                 total += labels.size(0)
 
         avg_val_loss = total_val_loss / len(val_dataloader)
+        scheduler.step(avg_val_loss)
         val_accuracy = 100.0 * correct / total
 
         print(
