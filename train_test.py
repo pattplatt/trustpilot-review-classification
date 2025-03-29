@@ -12,7 +12,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from transformers import AutoModel
+from transformers import AutoModel, AutoConfig
 
 class ReviewsDataset(Dataset):
     """
@@ -66,12 +66,6 @@ class FocalLoss(nn.Module):
         return focal_loss.mean()
 
 class ReviewClassifier(nn.Module):
-    """
-    A simple Transformer-based classifier that:
-    1. Embeds input tokens
-    2. Passes them through TransformerEncoder layers
-    3. Applies a linear classification head
-    """
     def __init__(
         self,
         vocab_size,
@@ -81,51 +75,100 @@ class ReviewClassifier(nn.Module):
         hidden_dim=768,
         num_classes=5,
         max_seq_len=512,
-        droput=0.1
+        droput=0.1,
+        model_type="vanilla"
     ):
         super(ReviewClassifier, self).__init__()
-        self.embedding = AutoModel.from_pretrained("dbmdz/bert-base-german-cased")
+        self.model_type = model_type
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_dim
 
-        self.positional_embedding = PositionalEmbedding(max_seq_len, embed_dim)
-        self.encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=num_heads,
-            dim_feedforward=hidden_dim,
-            batch_first=True,
-            dropout=droput
-        )
+        if self.model_type == "vanilla":
+            # 1) A typical embedding layer
+            self.token_embedding = nn.Embedding(vocab_size, embed_dim)
 
-        self.transformer_encoder = nn.TransformerEncoder(
-            self.encoder_layer, 
-            num_layers=num_layers
-        )
-        self.fc1 = nn.Linear(embed_dim * 2, hidden_dim)  # 1536 input to hidden_dim
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.1)
-        self.fc2 = nn.Linear(hidden_dim, num_classes)
+            # 2) Positional embedding
+            self.positional_embedding = PositionalEmbedding(max_seq_len, embed_dim)
 
-    def forward(self, input_ids, attn_mask):
-        # Convert tokens to embeddings
-        x = self.embedding(input_ids,attention_mask=attn_mask).last_hidden_state
-        # Add positional embeddings
-        pos_embed = self.positional_embedding(input_ids)
-        x = x + pos_embed
-        # Forward pass through the Transformer encoder
-        x = self.transformer_encoder(x)
-        # Extract [CLS] token representation (first token in sequence)
-        cls_token_output = x[:, 0, :]
+            # 3) Transformer encoder
+            self.encoder_layer = nn.TransformerEncoderLayer(
+                d_model=embed_dim,
+                nhead=num_heads,
+                dim_feedforward=hidden_dim,
+                batch_first=True,
+                dropout=droput
+            )
+            self.transformer_encoder = nn.TransformerEncoder(
+                self.encoder_layer,
+                num_layers=num_layers
+            )
+            # Then feed-forward
+            self.fc1 = nn.Linear(embed_dim * 2, hidden_dim)
+            self.relu = nn.ReLU()
+            self.dropout = nn.Dropout(droput)
+            self.fc2 = nn.Linear(hidden_dim, num_classes)
 
-        # Max pooling across all token representations
-        pooled_output, _ = torch.max(x, dim=1)
+        elif self.model_type == "bert":
+            # Load BERT
+            self.bert = AutoModel.from_pretrained("bert-base-uncased")
+            # Classification layers
+            # BERT hidden size is typically 768 for bert-base-uncased
+            self.fc1 = nn.Linear(768 * 2, hidden_dim)
+            self.relu = nn.ReLU()
+            self.dropout = nn.Dropout(droput)
+            self.fc2 = nn.Linear(hidden_dim, num_classes)
 
-        # Concatenate CLS token and pooled output
+        elif self.model_type == "roberta":
+            # Load RoBERTa
+            self.roberta = AutoModel.from_pretrained("roberta-base")
+            # Classification layers
+            # roberta-base hidden size is also 768
+            self.fc1 = nn.Linear(768 * 2, hidden_dim)
+            self.relu = nn.ReLU()
+            self.dropout = nn.Dropout(droput)
+            self.fc2 = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, input_ids, attn_mask=None):
+        if self.model_type == "vanilla":
+            # ======= Vanilla approach =======
+            x = self.token_embedding(input_ids)
+            pos_embed = self.positional_embedding(input_ids)
+            x = x + pos_embed  # Add positional embeddings
+            x = self.transformer_encoder(x)
+
+            # [CLS] token representation (assuming first token)
+            cls_token_output = x[:, 0, :]
+            # Max pooling across sequence
+            pooled_output, _ = torch.max(x, dim=1)
+
+        elif self.model_type == "bert":
+            # ======= BERT approach =======
+            outputs = self.bert(input_ids, attention_mask=attn_mask)
+            # BERT's last hidden states: (batch_size, seq_len, hidden_size)
+            last_hidden_state = outputs.last_hidden_state
+
+            # For typical classification, you can use the [CLS] token
+            cls_token_output = last_hidden_state[:, 0, :]
+            # Max pooling
+            pooled_output, _ = torch.max(last_hidden_state, dim=1)
+
+        elif self.model_type == "roberta":
+            # ======= RoBERTa approach =======
+            outputs = self.roberta(input_ids, attention_mask=attn_mask)
+            # RoBERTa's last hidden states
+            last_hidden_state = outputs.last_hidden_state
+
+            # [CLS] token is at position 0 in RoBERTa, too
+            cls_token_output = last_hidden_state[:, 0, :]
+            # Max pooling
+            pooled_output, _ = torch.max(last_hidden_state, dim=1)
+
+        # Then combine the two representations
         x = torch.cat((cls_token_output, pooled_output), dim=1)
-
-        # Fully connected layers (feedforward block)
         x = self.fc1(x)
         x = self.relu(x)
         x = self.dropout(x)
-        x = self.fc2(x)  # Final classification layer
+        x = self.fc2(x)
         return x
 
 def get_args():
@@ -145,6 +188,7 @@ def get_args():
     parser.add_argument("--test_pt", type=str, required=True, help="Path to tokenized test data (.pt).")
 
     # Model parameters
+    parser.add_argument("--model_type",type=str,default="vanilla",choices=["vanilla", "bert", "roberta"],help="Model architecture choice: vanilla, bert, or roberta.")
     parser.add_argument("--vocab_size", type=int, default=31102, help="Vocabulary size.")
     parser.add_argument("--embed_dim", type=int, default=768, help="Embedding dimension.")
     parser.add_argument("--num_heads", type=int, default=4, help="Number of attention heads.")
@@ -159,7 +203,13 @@ def get_args():
     parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate.")
     parser.add_argument("--epochs", type=int, default=5, help="Number of epochs.")
     parser.add_argument("--device", type=str, default=None, help="Device to use (cpu, cuda, mps).")
-    parser.add_argument("--weighted_loss", action="store_true", help="Compute weighted loss for inbalanced data")
+    parser.add_argument(
+        "--weighted_loss",
+        type=str,
+        default="none",
+        choices=["none", "weighted", "focal"],
+        help="Loss function: none (CrossEntropy), weighted (weighted CrossEntropy), or focal (FocalLoss)"
+    )
 
     return parser.parse_args()
 
@@ -213,7 +263,6 @@ def train(args):
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
-    # Instantiate model
     model = ReviewClassifier(
         vocab_size=args.vocab_size,
         embed_dim=args.embed_dim,
@@ -222,7 +271,8 @@ def train(args):
         hidden_dim=args.hidden_dim,
         num_classes=args.num_classes,
         max_seq_len=args.max_seq_len,
-        droput=args.dropout
+        droput=args.dropout,
+        model_type=args.model_type
     ).to(device)
 
     # Compute inverse frequencies
@@ -235,10 +285,12 @@ def train(args):
     print("Class Weights:", class_weights_tensor)
 
     # Loss and optimizer
-    if args.weighted_loss:
+    if args.weighted_loss == "weighted":
         criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    elif args.weighted_loss == "focal":
+        criterion = FocalLoss(alpha=class_weights_tensor)
     else:
-        criterion = FocalLoss()
+        criterion = nn.CrossEntropyLoss()
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.5)
@@ -302,7 +354,7 @@ def train(args):
     df = pd.DataFrame(training_logs, columns=["Epoch", "Train Loss", "Val Loss", "Val Accuracy"])
 
     # Create a directory for the model using its name
-    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}{'_weighted' if args.weighted_loss else ''}"
+    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}_{args.weighted_loss}"
     os.makedirs(model_dir, exist_ok=True)  # Ensure directory is created
 
     # Save the trained model inside the directory
@@ -322,8 +374,7 @@ def test(args):
 
     test_dataset = ReviewsDataset(test_data, test_labels['Rating'].to_numpy())
     test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-
-    # Load the trained model (ensure you saved it before)
+    
     model = ReviewClassifier(
         vocab_size=args.vocab_size,
         embed_dim=args.embed_dim,
@@ -332,7 +383,8 @@ def test(args):
         hidden_dim=args.hidden_dim,
         num_classes=args.num_classes,
         max_seq_len=args.max_seq_len,
-        droput=args.dropout
+        droput=args.dropout,
+        model_type=args.model_type
     )
 
     # If device not provided, choose auto
@@ -347,7 +399,7 @@ def test(args):
     else:
         device = torch.device(args.device)
 
-    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}{'_weighted' if args.weighted_loss else ''}"
+    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}_{args.weighted_loss}"
 
     model.load_state_dict(torch.load(f'./{model_dir}/model.pth', map_location=device,  weights_only=False))
     model.to(device)
@@ -384,7 +436,7 @@ def test(args):
     class_report_df = pd.DataFrame(class_report).transpose()
     
     # Define the model directory
-    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}{'_weighted' if args.weighted_loss else ''}"
+    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}_{args.weighted_loss}"
     os.makedirs(model_dir, exist_ok=True)
 
     # Save accuracy and classification report to CSV
