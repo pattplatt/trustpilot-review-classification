@@ -123,16 +123,6 @@ class ReviewClassifier(nn.Module):
             self.dropout = nn.Dropout(droput)
             self.fc2 = nn.Linear(hidden_dim, num_classes)
 
-        elif self.model_type == "roberta":
-            # Load RoBERTa
-            self.roberta = AutoModel.from_pretrained("roberta-base")
-            # Classification layers
-            # roberta-base hidden size is also 768
-            self.fc1 = nn.Linear(768 * 2, hidden_dim)
-            self.relu = nn.ReLU()
-            self.dropout = nn.Dropout(droput)
-            self.fc2 = nn.Linear(hidden_dim, num_classes)
-
     def forward(self, input_ids, attn_mask=None):
         if self.model_type == "vanilla":
             # ======= Vanilla approach =======
@@ -153,17 +143,6 @@ class ReviewClassifier(nn.Module):
             last_hidden_state = outputs.last_hidden_state
 
             # For typical classification, you can use the [CLS] token
-            cls_token_output = last_hidden_state[:, 0, :]
-            # Max pooling
-            pooled_output, _ = torch.max(last_hidden_state, dim=1)
-
-        elif self.model_type == "roberta":
-            # ======= RoBERTa approach =======
-            outputs = self.roberta(input_ids, attention_mask=attn_mask)
-            # RoBERTa's last hidden states
-            last_hidden_state = outputs.last_hidden_state
-
-            # [CLS] token is at position 0 in RoBERTa, too
             cls_token_output = last_hidden_state[:, 0, :]
             # Max pooling
             pooled_output, _ = torch.max(last_hidden_state, dim=1)
@@ -349,7 +328,6 @@ def train(args):
 
         avg_val_loss = total_val_loss / len(val_dataloader)
         val_losses.append(avg_val_loss)
-        scheduler.step(avg_val_loss)
         val_accuracy = 100.0 * correct / total
 
         print(
@@ -523,9 +501,7 @@ def test(args):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig("loss_plot.png")  # Saves plot to file
-    plt.show()
-
+    
     # Save the figure inside the model directory
     losses_path = os.path.join(model_dir, "losses.png")
     plt.savefig(losses_path)
