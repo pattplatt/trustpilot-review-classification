@@ -194,6 +194,12 @@ def get_args():
         choices=["none", "weighted", "focal"],
         help="Loss function: none (CrossEntropy), weighted (weighted CrossEntropy), or focal (FocalLoss)"
     )
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Path to a saved model (.pth) file for testing. If None, the code uses the default path based on hyperparameters."
+    )
 
     return parser.parse_args()
 
@@ -391,9 +397,14 @@ def test(args):
         device = torch.device(args.device)
 
     model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}_{args.weighted_loss}"
-
+    
     os.makedirs(model_dir, exist_ok=True)
-    model.load_state_dict(torch.load(f'./{model_dir}/model.pth', map_location=device,  weights_only=False))
+    if args.model_path is not None:
+        model_load_path = args.model_path
+    else:
+        model_load_path = os.path.join(model_dir, "model.pth")
+
+    model.load_state_dict(torch.load(model_load_path, map_location=device))
     model.to(device)
     model.eval()  # Set to evaluation mode
 
@@ -487,7 +498,7 @@ def test(args):
         train_losses = train_log_df["Train Loss"].tolist()
         val_losses = train_log_df["Val Loss"].tolist()
     else:
-        print("⚠️ training_log.csv not found. Skipping loss plot.")
+        print("Training_log.csv not found. Skipping loss plot.")
 
     epochs = range(1, len(train_losses) + 1)
 
