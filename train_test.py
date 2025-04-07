@@ -104,17 +104,22 @@ class ReviewClassifier(nn.Module):
             )
             # Then feed-forward
             self.fc1 = nn.Linear(embed_dim * 2, hidden_dim)
-            self.relu = nn.ReLU()
+            self.gelu = nn.GELU()
             self.dropout = nn.Dropout(droput)
             self.fc2 = nn.Linear(hidden_dim, num_classes)
 
         elif self.model_type == "bert":
             # Load BERT
-            self.bert = AutoModel.from_pretrained("bert-base-uncased")
-            # Classification layers
+            self.bert = AutoModel.from_pretrained("dbmdz/bert-base-german-cased")
+            for name, param in self.bert.named_parameters():
+                if "encoder.layer.10" in name or "encoder.layer.11" in name:
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+           # Classification layers
             # BERT hidden size is typically 768 for bert-base-uncased
             self.fc1 = nn.Linear(768 * 2, hidden_dim)
-            self.relu = nn.ReLU()
+            self.gelu = nn.GELU()
             self.dropout = nn.Dropout(droput)
             self.fc2 = nn.Linear(hidden_dim, num_classes)
 
@@ -166,7 +171,7 @@ class ReviewClassifier(nn.Module):
         # Then combine the two representations
         x = torch.cat((cls_token_output, pooled_output), dim=1)
         x = self.fc1(x)
-        x = self.relu(x)
+        x = self.gelu(x)
         x = self.dropout(x)
         x = self.fc2(x)
         return x
@@ -294,7 +299,11 @@ def train(args):
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.5)
-    # Training loop
+   
+    train_losses = []
+    val_losses = []
+    
+   # Training loop
     for epoch in range(args.epochs):
         # Training Phase
         model.train()
@@ -314,7 +323,10 @@ def train(args):
             optimizer.step()
             total_train_loss += loss.item()
 
+        
         avg_train_loss = total_train_loss / len(train_dataloader)        
+        train_losses.append(avg_train_loss)
+
         # Validation Phase
         model.eval()
         total_val_loss = 0.0
@@ -336,6 +348,7 @@ def train(args):
                 total += labels.size(0)
 
         avg_val_loss = total_val_loss / len(val_dataloader)
+        val_losses.append(avg_val_loss)
         scheduler.step(avg_val_loss)
         val_accuracy = 100.0 * correct / total
 
@@ -401,13 +414,38 @@ def test(args):
 
     model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}_{args.weighted_loss}"
 
+    os.makedirs(model_dir, exist_ok=True)
     model.load_state_dict(torch.load(f'./{model_dir}/model.pth', map_location=device,  weights_only=False))
     model.to(device)
     model.eval()  # Set to evaluation mode
 
+    # Get label counts
+    label_counts = np.bincount(test_labels['Rating'] - 1)  # Count occurrences of each label
+
+    # Normalize to get ratio
+    label_ratios = label_counts / sum(label_counts)
+
+    print("Label Ratios:", label_ratios)
+
+    # Compute inverse frequencies
+    class_weights = 1.0 / (label_counts + 1e-6)  # Avoid division by zero
+    class_weights /= class_weights.sum()  # Normalize
+
+    # Convert to tensor for PyTorch
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+
+    # Loss and optimizer
+    if args.weighted_loss == "weighted":
+        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    elif args.weighted_loss == "focal":
+        criterion = FocalLoss(alpha=class_weights_tensor)
+    else:
+        criterion = nn.CrossEntropyLoss()
+
     # Evaluation Loop
     all_preds = []
     all_labels = []
+    test_loss = 0.0
 
     with torch.no_grad():
         for batch in test_dataloader:
@@ -416,11 +454,13 @@ def test(args):
             labels = batch["labels"].to(device)
 
             outputs = model(input_ids, attn_mask)
+            loss = criterion(outputs, labels)
+            test_loss += loss.item()
             predictions = torch.argmax(outputs, dim=1)
 
             all_preds.extend(predictions.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
-
+    test_loss = test_loss / len(test_dataloader)
     # Compute Accuracy
     test_accuracy = accuracy_score(all_labels, all_preds)
     # Compute F1-score (weighted)
@@ -435,10 +475,6 @@ def test(args):
     # Convert classification report to DataFrame
     class_report_df = pd.DataFrame(class_report).transpose()
     
-    # Define the model directory
-    model_dir = f"model_embed{args.embed_dim}_heads{args.num_heads}_layers{args.num_layers}_hidden{args.hidden_dim}_lr{args.lr}_batch{args.batch_size}_epochs{args.epochs}_classes{args.num_classes}_{args.weighted_loss}"
-    os.makedirs(model_dir, exist_ok=True)
-
     # Save accuracy and classification report to CSV
     test_report_path = os.path.join(model_dir, "test_results.csv")
     
@@ -465,6 +501,34 @@ def test(args):
     # Save the figure inside the model directory
     conf_matrix_path = os.path.join(model_dir, "confusion_matrix.png")
     plt.savefig(conf_matrix_path)
+    plt.close()
+
+    log_path = os.path.join(model_dir, "training_log.csv")
+    if os.path.exists(log_path):
+        train_log_df = pd.read_csv(log_path)
+        train_losses = train_log_df["Train Loss"].tolist()
+        val_losses = train_log_df["Val Loss"].tolist()
+    else:
+        print("⚠️ training_log.csv not found. Skipping loss plot.")
+
+    epochs = range(1, len(train_losses) + 1)
+
+    plt.plot(epochs, train_losses, label="Train Loss")
+    plt.plot(epochs, val_losses, label="Validation Loss")
+    plt.axhline(test_loss, color='r', linestyle='--', label=f"Test Loss: {test_loss:.4f}")
+
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training, Validation and Test Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("loss_plot.png")  # Saves plot to file
+    plt.show()
+
+    # Save the figure inside the model directory
+    losses_path = os.path.join(model_dir, "losses.png")
+    plt.savefig(losses_path)
     plt.close()
 
 def main():
